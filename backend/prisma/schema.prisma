@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MAHASISWA
+  DOSEN
+  ADMIN
+}
+
+enum AssignmentType {
+  TUGAS
+  KUIS
+}
+
+enum AttendanceStatus {
+  HADIR
+  ABSEN
+  IZIN
+  SAKIT
+}
+
+enum PaymentStatus {
+  LUNAS
+  BELUM_LUNAS
+}
+
+enum AnnouncementSource {
+  MANUAL
+  LLM_EXTRACTED
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationSource {
+  RULE
+  LLM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+model User {
+  id            String         @id @default(uuid())
+  nim           String         @unique
+  nama          String
+  password      String         // Hash / plain for simulation
+  role          Role           @default(MAHASISWA)
+  fcmToken      String?        @map("fcm_token")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  enrollments   Enrollment[]
+  attendances   Attendance[]
+  payments      Payment[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Course {
+  id          String        @id @default(uuid())
+  kodeMatkul  String        @unique @map("kode_matkul")
+  namaMatkul  String        @map("nama_matkul")
+  sks         Int           @default(3)
+  dosen       String
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  enrollments Enrollment[]
+  schedules   Schedule[]
+  assignments Assignment[]
+  attendances Attendance[]
+
+  @@map("courses")
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  courseId  String   @map("course_id")
+  semester  String   @default("2026/2027 Ganjil")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId, semester])
+  @@map("enrollments")
+}
+
+model Schedule {
+  id         String @id @default(uuid())
+  courseId   String @map("course_id")
+  hari       String // Senin, Selasa, Rabu, Kamis, Jumat, Sabtu
+  jamMulai   String @map("jam_mulai") // e.g. "08:00"
+  jamSelesai String @map("jam_selesai") // e.g. "10:30"
+  ruang      String
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("schedules")
+}
+
+model Assignment {
+  id          String         @id @default(uuid())
+  courseId    String         @map("course_id")
+  judul       String
+  deskripsi   String?
+  deadline    DateTime
+  jenis       AssignmentType @default(TUGAS)
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("assignments")
+}
+
+model Attendance {
+  id                 String           @id @default(uuid())
+  userId             String           @map("user_id")
+  courseId           String           @map("course_id")
+  tanggal            DateTime         @default(now())
+  status             AttendanceStatus @default(HADIR)
+  totalAbsenRunning  Int              @default(0) @map("total_absen_running")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model Payment {
+  id         String        @id @default(uuid())
+  userId     String        @map("user_id")
+  jenis      String        // e.g. "UKT Semester 7", "SPP Tahap 1"
+  nominal    Int
+  jatuhTempo DateTime      @map("jatuh_tempo")
+  status     PaymentStatus @default(BELUM_LUNAS)
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Announcement {
+  id                String             @id @default(uuid())
+  judul             String
+  isiTeks           String             @map("isi_teks") @db.Text
+  tanggalTerbit     DateTime           @default(now()) @map("tanggal_terbit")
+  extractedDeadline DateTime?          @map("extracted_deadline")
+  extractedAction   String?            @map("extracted_action")
+  targetAudience    String?            @map("target_audience")
+  source            AnnouncementSource @default(MANUAL)
+  rawLlmOutput      String?            @map("raw_llm_output") @db.Text
+  createdAt         DateTime           @default(now()) @map("created_at")
+
+  @@map("announcements")
+}
+
+model Notification {
+  id        String               @id @default(uuid())
+  eventId   String?              @map("event_id") // ID assignment / announcement / payment / schedule
+  userId    String               @map("user_id")
+  tipe      String               // "ASSIGNMENT_REMINDER", "DEADLINE_COLLISION_PRIORITY", "ATTENDANCE_WARNING", "PAYMENT_DUE", "SCHEDULE_ALERT", "ANNOUNCEMENT_ALERT"
+  prioritas NotificationPriority @default(MEDIUM)
+  source    NotificationSource   @default(RULE)
+  judul     String
+  pesan     String               @db.Text
+  payload   Json?
+  status    NotificationStatus   @default(PENDING)
+  sentAt    DateTime?            @map("sent_at")
+  createdAt DateTime             @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
